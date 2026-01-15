@@ -22,8 +22,6 @@ history_t *tail = NULL;
 history_t history_buffer[HISTORY_MAX];
 size_t next_id = 0;
 
-static volatile sig_atomic_t sig_int = 0;
-
 /*
  * Tokenizes the input line into tokens using strtok().
  * If the final token is exactly "&", sets *background = 1 and removes that token
@@ -164,7 +162,6 @@ void print_history()
  *   tokenized     - array of tokens
  *   command_size  - number of tokens in tokenized
  */
-
 void builtin_cd(char **tokenized, int command_size)
 {
     char curr_cwd[PATH_MAX];
@@ -329,10 +326,17 @@ void run_foreground(pid_t pid, char **tokenized)
     }
 }
 
+/**
+ * SIGINT (Ctrl-C) handler for the shell
+ *
+ * Writes a newline to standard output to keep the shell alive and
+ * allow the main loop to redisplay the prompt.
+ *
+ * sig  - Signal number (unused)
+ */
 static void handle_sigint(int sig)
 {
     (void)sig;
-    sig_int = 1;
     write(STDOUT_FILENO, "\n", 1);
 }
 
@@ -349,11 +353,10 @@ static void handle_sigint(int sig)
 int main()
 {
     signal(SIGCHLD, SIG_IGN);   // Reap background children
-    signal(SIGINT, handle_sigint);
+    signal(SIGINT, handle_sigint); // Handle Ctrl-C without terminating the shell 
 
     while (1)
     {
-        sig_int = 0;
         char prompt[256];
         build_shell_prompt(prompt, sizeof(prompt));
 
