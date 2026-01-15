@@ -4,6 +4,8 @@
 #include <unistd.h>
 #include <limits.h>
 #include <editline/readline.h>
+#include <sys/wait.h>
+#include <signal.h>
 
 #define MAX_CMD_LETTER_SIZE 1000
 #define MAX_CMD_STRING_NUM 100
@@ -19,6 +21,8 @@ history_t *head = NULL;
 history_t *tail = NULL;
 history_t history_buffer[HISTORY_MAX];
 size_t next_id = 0;
+
+static volatile sig_atomic_t sig_int = 0;
 
 /*
  * Tokenizes the input line into tokens using strtok().
@@ -48,7 +52,10 @@ char **parse_line(char *line, int *background, int *command_size)
     while (token != NULL)
     {
         if (i >= MAX_CMD_STRING_NUM - 1)
+        {
+            free(tokenized);
             return NULL;
+        }
 
         tokenized[i] = token;
         i++;
@@ -310,6 +317,7 @@ void run_foreground(pid_t pid, char **tokenized)
     }
     else if (pid == 0)
     {
+        signal(SIGINT, SIG_DFL);
         execvp(tokenized[0], tokenized);
         printf("Failed executing command\n");
         exit(1);
@@ -319,6 +327,13 @@ void run_foreground(pid_t pid, char **tokenized)
         int status;
         waitpid(pid, &status, 0);
     }
+}
+
+static void handle_sigint(int sig)
+{
+    (void)sig;
+    sig_int = 1;
+    write(STDOUT_FILENO, "\n", 1);
 }
 
 /*
@@ -333,15 +348,19 @@ void run_foreground(pid_t pid, char **tokenized)
  */
 int main()
 {
+    signal(SIGCHLD, SIG_IGN);   // Reap background children
+    signal(SIGINT, handle_sigint);
+
     while (1)
     {
+        sig_int = 0;
         char prompt[256];
         build_shell_prompt(prompt, sizeof(prompt));
 
         char *line = readline(prompt);
         if (!line)
         {
-            printf("\n");
+            free(line);
             break;
         }
 
@@ -349,6 +368,7 @@ int main()
         int background = 0;
         int command_size = 0;
         char **tokenized = parse_line(line, &background, &command_size);
+
         if (tokenized == NULL)
         {
             free(line);
@@ -397,8 +417,12 @@ int main()
         if (strcmp(tokenized[0], "cd") == 0)
         {
             builtin_cd(tokenized, command_size);
+            free(tokenized);
+            free(line);
+            continue;
         }
 
+        // Fork a process and choose whether to execute in background or foreground
         pid_t pid = fork();
 
         if (background == 1)
