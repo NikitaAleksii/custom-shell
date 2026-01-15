@@ -30,7 +30,7 @@ size_t next_id = 0;
  *   command_size - output count of tokens excluding "&"
  *
  * Returns:
- *   Pointer to a heap-allocated array of char* tokens, or NULL on failure/empty input
+ *   Pointer to a NULL-terminated heap-allocated array of char* tokens, or NULL on failure/empty input
  *   The returned array should be freed by the caller
  */
 char **parse_line(char *line, int *background, int *command_size)
@@ -61,7 +61,6 @@ char **parse_line(char *line, int *background, int *command_size)
     // If the last entered character is &, set the background flag to 1, and remove the character from the array
     if (strcmp(tokenized[i - 1], "&") == 0)
     {
-        printf("%s", tokenized[i - 1]);
         fflush(stdout);
         tokenized[i - 1] = NULL;
         *background = 1;
@@ -237,7 +236,7 @@ void builtin_cd(char **tokenized, int command_size)
 }
 
 /*
- * Builds the interactive shell prompt string.
+ * Builds the interactive shell prompt string
  *
  * The prompt is formatted as:
  *     "<user> <current-directory> > "
@@ -261,6 +260,65 @@ void build_shell_prompt(char *prompt, size_t size)
 
     snprintf(prompt, size, "%s %s> ", user, dir);
     free(cwd);
+}
+
+/*
+ * Executes a command in the background
+ *
+ * This function is intended to be called after a fork().
+ * If the process is a child process (pid == 0), it replaces
+ * the child’s image with the requested program using execvp()
+ *
+ * Parameters:
+ *   pid       - Process ID returned by fork()
+ *   tokenized - Null-terminated array of tokens representing the command
+ */
+void run_background(pid_t pid, char **tokenized)
+{
+    if (pid < 0)
+    {
+        printf("Error in Running in Background\n");
+        return;
+    }
+    else if (pid == 0)
+    {
+        execvp(tokenized[0], tokenized);
+        printf("Failed executing command\n");
+        exit(1);
+    }
+}
+
+/**
+ * Executes a command in the foreground
+ *
+ * This function is intended to be called after a fork().
+ * If the process is a child process (pid == 0), it replaces
+ * the child’s image with the requested program using execvp().
+ * If the process is the parent, it waits for the child process
+ * to complete before returning control to the shell prompt
+ *
+ * Parameters:
+ *   pid       - Process ID returned by fork()
+ *   tokenized - Null-terminated array of tokens representing the command
+ */
+void run_foreground(pid_t pid, char **tokenized)
+{
+    if (pid < 0)
+    {
+        printf("Error in Running in Foreground\n");
+        return;
+    }
+    else if (pid == 0)
+    {
+        execvp(tokenized[0], tokenized);
+        printf("Failed executing command\n");
+        exit(1);
+    }
+    else
+    {
+        int status;
+        waitpid(pid, &status, 0);
+    }
 }
 
 /*
@@ -341,9 +399,19 @@ int main()
             builtin_cd(tokenized, command_size);
         }
 
+        pid_t pid = fork();
+
+        if (background == 1)
+        {
+            run_background(pid, tokenized);
+        }
+        else
+        {
+            run_foreground(pid, tokenized);
+        }
+
         free(tokenized);
         free(line);
     }
-
     return 0;
 }
