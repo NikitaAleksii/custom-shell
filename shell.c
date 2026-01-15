@@ -20,6 +20,19 @@ history_t *tail = NULL;
 history_t history_buffer[HISTORY_MAX];
 size_t next_id = 0;
 
+/*
+ * Tokenizes the input line into tokens using strtok().
+ * If the final token is exactly "&", sets *background = 1 and removes that token
+ *
+ * Parameters:
+ *   line         - user input
+ *   background   - output flag: set to 1 if last token is "&", otherwise unchanged/0
+ *   command_size - output count of tokens excluding "&"
+ *
+ * Returns:
+ *   Pointer to a heap-allocated array of char* tokens, or NULL on failure/empty input
+ *   The returned array should be freed by the caller
+ */
 char **parse_line(char *line, int *background, int *command_size)
 {
     char *token = strtok(line, " \n");
@@ -30,18 +43,20 @@ char **parse_line(char *line, int *background, int *command_size)
     if (!tokenized)
         return NULL;
 
-    // Parse through user input and append it to the array
+    // Parse through user input and append tokens to the array
     int i = 0;
     while (token != NULL)
     {
-        if (i > MAX_CMD_STRING_NUM)
+        if (i >= MAX_CMD_STRING_NUM - 1)
             return NULL;
 
         tokenized[i] = token;
         i++;
-        *command_size = *command_size + 1;
         token = strtok(NULL, " \n");
     }
+
+    tokenized[i] = NULL;
+    *command_size = i;
 
     // If the last entered character is &, set the background flag to 1, and remove the character from the array
     if (strcmp(tokenized[i - 1], "&") == 0)
@@ -56,11 +71,21 @@ char **parse_line(char *line, int *background, int *command_size)
     return tokenized;
 }
 
+/*
+ * Reconstructs a command string from a token array and appends it
+ * to the circular history buffer. Updates history IDs and head/tail pointers
+ *
+ * Parameters:
+ *   tokenized - array of tokens
+ *
+ * Side effects:
+ *   Modifies global history state: history_buffer, head, tail, next_id
+ */
 void add_shell_history(char **tokenized)
 {
     char command[MAX_CMD_LETTER_SIZE] = "";
 
-    // Combine tokens to get a command
+    // Reconstruct a command from tokens
     int i = 0;
     while (tokenized[i] != NULL)
     {
@@ -69,8 +94,9 @@ void add_shell_history(char **tokenized)
         i++;
     }
 
+    // Create a new history entry, copy the command string into it,
+    // and assign a unique sequential ID.
     history_t new_element;
-
     strcpy(new_element.command, command);
     new_element.id = next_id;
     next_id++;
@@ -94,6 +120,12 @@ void add_shell_history(char **tokenized)
     }
 }
 
+/*
+ * Prints the contents of the shell history buffer in chronological order,
+ * starting from the oldest entry (head). Iterates through the circular
+ * history buffer and stops when an unused entry is encountered or when
+ * HISTORY_MAX entries have been printed
+ */
 void print_history()
 {
     if (head == NULL)
@@ -111,6 +143,21 @@ void print_history()
             return;
     }
 }
+
+/*
+ * Implements the built-in `cd` command
+ *
+ * Behavior:
+ *   - With no arguments (command_size == 1), changes to $HOME
+ *   - With one argument (command_size == 2):
+ *       If the argument is "-", changes to $OLDPWD and prints the target path
+ *       Otherwise, changes to the provided path
+ *   - With more than one argument, prints an error and does nothing
+ *
+ * Parameters:
+ *   tokenized     - array of tokens
+ *   command_size  - number of tokens in tokenized
+ */
 
 void builtin_cd(char **tokenized, int command_size)
 {
@@ -152,7 +199,7 @@ void builtin_cd(char **tokenized, int command_size)
     }
     else
     {
-        printf("Too many variables\n");
+        printf("Too many arguments\n");
         fflush(stdout);
         return;
     }
@@ -189,6 +236,16 @@ void builtin_cd(char **tokenized, int command_size)
     }
 }
 
+/*
+ * Builds the interactive shell prompt string.
+ *
+ * The prompt is formatted as:
+ *     "<user> <current-directory> > "
+ *
+ * Parameters:
+ *   prompt - output buffer to store the formatted prompt string
+ *   size   - size of the output buffer in bytes
+ */
 void build_shell_prompt(char *prompt, size_t size)
 {
     const char *user = getenv("USER");
@@ -206,6 +263,16 @@ void build_shell_prompt(char *prompt, size_t size)
     free(cwd);
 }
 
+/*
+ * Main REPL loop for the shell.
+ *
+ * Repeatedly:
+ *   1) Builds and displays a prompt showing USER and the current directory name.
+ *   2) Reads a line of input using readline().
+ *   3) Tokenizes the input into an argv-style array and detects background requests ('&').
+ *   4) Adds the command to the shell's history buffer.
+ *   5) Executes supported built-in commands (exit, history, pwd, cd).
+ */
 int main()
 {
     while (1)
