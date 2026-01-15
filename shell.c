@@ -4,6 +4,8 @@
 #include <unistd.h>
 #include <limits.h>
 #include <editline/readline.h>
+#include <sys/wait.h>
+#include <signal.h>
 
 #define MAX_CMD_LETTER_SIZE 1000
 #define MAX_CMD_STRING_NUM 100
@@ -30,7 +32,7 @@ size_t next_id = 0;
  *   command_size - output count of tokens excluding "&"
  *
  * Returns:
- *   Pointer to a heap-allocated array of char* tokens, or NULL on failure/empty input
+ *   Pointer to a NULL-terminated heap-allocated array of char* tokens, or NULL on failure/empty input
  *   The returned array should be freed by the caller
  */
 char **parse_line(char *line, int *background, int *command_size)
@@ -48,7 +50,10 @@ char **parse_line(char *line, int *background, int *command_size)
     while (token != NULL)
     {
         if (i >= MAX_CMD_STRING_NUM - 1)
+        {
+            free(tokenized);
             return NULL;
+        }
 
         tokenized[i] = token;
         i++;
@@ -61,7 +66,6 @@ char **parse_line(char *line, int *background, int *command_size)
     // If the last entered character is &, set the background flag to 1, and remove the character from the array
     if (strcmp(tokenized[i - 1], "&") == 0)
     {
-        printf("%s", tokenized[i - 1]);
         fflush(stdout);
         tokenized[i - 1] = NULL;
         *background = 1;
@@ -158,7 +162,6 @@ void print_history()
  *   tokenized     - array of tokens
  *   command_size  - number of tokens in tokenized
  */
-
 void builtin_cd(char **tokenized, int command_size)
 {
     char curr_cwd[PATH_MAX];
@@ -237,7 +240,7 @@ void builtin_cd(char **tokenized, int command_size)
 }
 
 /*
- * Builds the interactive shell prompt string.
+ * Builds the interactive shell prompt string
  *
  * The prompt is formatted as:
  *     "<user> <current-directory> > "
@@ -264,6 +267,80 @@ void build_shell_prompt(char *prompt, size_t size)
 }
 
 /*
+ * Executes a command in the background
+ *
+ * This function is intended to be called after a fork().
+ * If the process is a child process (pid == 0), it replaces
+ * the child’s image with the requested program using execvp()
+ *
+ * Parameters:
+ *   pid       - Process ID returned by fork()
+ *   tokenized - Null-terminated array of tokens representing the command
+ */
+void run_background(pid_t pid, char **tokenized)
+{
+    if (pid < 0)
+    {
+        printf("Error in Running in Background\n");
+        return;
+    }
+    else if (pid == 0)
+    {
+        execvp(tokenized[0], tokenized);
+        printf("Failed executing command\n");
+        exit(1);
+    }
+}
+
+/**
+ * Executes a command in the foreground
+ *
+ * This function is intended to be called after a fork().
+ * If the process is a child process (pid == 0), it replaces
+ * the child’s image with the requested program using execvp().
+ * If the process is the parent, it waits for the child process
+ * to complete before returning control to the shell prompt
+ *
+ * Parameters:
+ *   pid       - Process ID returned by fork()
+ *   tokenized - Null-terminated array of tokens representing the command
+ */
+void run_foreground(pid_t pid, char **tokenized)
+{
+    if (pid < 0)
+    {
+        printf("Error in Running in Foreground\n");
+        return;
+    }
+    else if (pid == 0)
+    {
+        signal(SIGINT, SIG_DFL);
+        execvp(tokenized[0], tokenized);
+        printf("Failed executing command\n");
+        exit(1);
+    }
+    else
+    {
+        int status;
+        waitpid(pid, &status, 0);
+    }
+}
+
+/**
+ * SIGINT (Ctrl-C) handler for the shell
+ *
+ * Writes a newline to standard output to keep the shell alive and
+ * allow the main loop to redisplay the prompt.
+ *
+ * sig  - Signal number (unused)
+ */
+static void handle_sigint(int sig)
+{
+    (void)sig;
+    write(STDOUT_FILENO, "\n", 1);
+}
+
+/*
  * Main REPL loop for the shell.
  *
  * Repeatedly:
@@ -275,6 +352,9 @@ void build_shell_prompt(char *prompt, size_t size)
  */
 int main()
 {
+    signal(SIGCHLD, SIG_IGN);   // Reap background children
+    signal(SIGINT, handle_sigint); // Handle Ctrl-C without terminating the shell 
+
     while (1)
     {
         char prompt[256];
@@ -283,7 +363,7 @@ int main()
         char *line = readline(prompt);
         if (!line)
         {
-            printf("\n");
+            free(line);
             break;
         }
 
@@ -291,6 +371,7 @@ int main()
         int background = 0;
         int command_size = 0;
         char **tokenized = parse_line(line, &background, &command_size);
+
         if (tokenized == NULL)
         {
             free(line);
@@ -339,11 +420,25 @@ int main()
         if (strcmp(tokenized[0], "cd") == 0)
         {
             builtin_cd(tokenized, command_size);
+            free(tokenized);
+            free(line);
+            continue;
+        }
+
+        // Fork a process and choose whether to execute in background or foreground
+        pid_t pid = fork();
+
+        if (background == 1)
+        {
+            run_background(pid, tokenized);
+        }
+        else
+        {
+            run_foreground(pid, tokenized);
         }
 
         free(tokenized);
         free(line);
     }
-
     return 0;
 }
