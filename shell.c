@@ -340,8 +340,22 @@ static void handle_sigint(int sig)
     write(STDOUT_FILENO, "\n", 1);
 }
 
-/*
- * pipeline = {{"command 1"}, {"command 2"}}
+/**
+ * Splits a tokenized command line into pipeline segments
+ *
+ * This function scans the token array for pipe symbols ("|") and divides
+ * the input into multiple command arrays, one for each stage
+ * of the pipeline. Each resulting command array is NULL-terminated.
+ *
+ * Memory for the pipeline structure and each command segment is dynamically
+ * allocated.
+ *
+ * Parameters:
+ *   tokenized - NULL-terminated array of tokens produced by the tokenizer
+ *   pipeline  - Output parameter; on success, points to multiple command arrays, one per pipeline stage
+ *
+ * Returns:
+ *   The number of pipe symbols found in the input
  */
 int split_pipeline(char **tokenized, char ****pipeline)
 {
@@ -380,9 +394,22 @@ int split_pipeline(char **tokenized, char ****pipeline)
     return pipes;
 }
 
+/**
+ * Executes a pipeline of commands connected by pipes
+ *
+ * Each element of the pipeline array represents one command in the pipeline
+ * and is a NULL-terminated array.
+ * The function creates the required pipes, forks one process per command,
+ * and connects standard input and output using dup2() so that the output of
+ * each command becomes the input of the next
+ *
+ * Parameters:
+ *   pipeline - Array of command argument vectors (char **), one per pipeline stage
+ *   cmds     - Number of commands in the pipeline
+ */
 void run_pipeline(char ***pipeline, int cmds)
 {
-    int prev_fd = -1;
+    int prev_fd = -1; // read end of previous pipe
 
     pid_t *pids = malloc(cmds * sizeof(pid_t));
     if (pids == NULL)
@@ -395,6 +422,7 @@ void run_pipeline(char ***pipeline, int cmds)
     {
         int fd[2] = {-1, -1};
 
+        // Create a pipe for all but the last command
         if (i < cmds - 1)
         {
             if (pipe(fd) == -1)
@@ -412,6 +440,7 @@ void run_pipeline(char ***pipeline, int cmds)
         pid_t pid;
         if ((pid = fork()) == -1)
         {
+            // Cleanup on fork failure
             perror("Failed running pipeline (fork)");
             if (prev_fd != -1)
                 close(prev_fd);
@@ -426,6 +455,8 @@ void run_pipeline(char ***pipeline, int cmds)
         }
         if (pid == 0)
         {
+            // Child
+            // Connect stdin to previous pipe
             if (prev_fd != -1)
             {
                 if (dup2(prev_fd, STDIN_FILENO) == -1)
@@ -435,6 +466,7 @@ void run_pipeline(char ***pipeline, int cmds)
                 }
             }
 
+            // Connect stdout to next pipe
             if (i < cmds - 1)
             {
                 close(fd[0]);
@@ -445,6 +477,8 @@ void run_pipeline(char ***pipeline, int cmds)
                 }
                 close(fd[1]);
             }
+
+            // Close inherited descriptors
             if (prev_fd != -1)
                 close(prev_fd);
 
@@ -452,6 +486,8 @@ void run_pipeline(char ***pipeline, int cmds)
             perror("Failed running pipeline (execvp)");
             exit(1);
         }
+        // Parent
+        // Track child and close unused FDs
         pids[i] = pid;
 
         if (prev_fd != -1)
@@ -466,6 +502,7 @@ void run_pipeline(char ***pipeline, int cmds)
     if (prev_fd != -1)
         close(prev_fd);
 
+    // Wait for all pipeline processes
     for (int i = 0; i < cmds; i++)
         waitpid(pids[i], NULL, 0);
 
