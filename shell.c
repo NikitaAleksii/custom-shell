@@ -292,7 +292,7 @@ void run_background(pid_t pid, char **tokenized)
     }
 }
 
-/**
+/*
  * Executes a command in the foreground
  *
  * This function is intended to be called after a fork().
@@ -326,7 +326,7 @@ void run_foreground(pid_t pid, char **tokenized)
     }
 }
 
-/**
+/*
  * SIGINT (Ctrl-C) handler for the shell
  *
  * Writes a newline to standard output to keep the shell alive and
@@ -341,6 +341,51 @@ static void handle_sigint(int sig)
 }
 
 /*
+ * pipeline = {{"command 1"}, {"command 2"}}
+ */
+int split_pipeline(char **tokenized, char ****pipeline)
+{
+    if (strcmp(tokenized[0], "|") == 0)
+        return NULL;
+
+    // Count the number of pipes
+    int pipes = 0;
+    for (int i = 0; tokenized[i] != NULL; i++)
+    {
+        if (strcmp(tokenized[0], "|") == 0)
+            pipes++;
+    }
+
+    // Allocate memmory for pipes + 1 commands
+    *pipeline = (char ***)malloc((pipes + 1) * sizeof(char **));
+
+    // Pipeline commands
+    int p = 0;
+    int start = 0;
+    for (int i = 0; tokenized[i] != NULL; i++)
+    {
+        if (tokenized[i] == NULL || strcmp(tokenized[i], "|") == 0)
+        {
+            int size = i - start;
+            *pipeline[p] = (char **)malloc((size + 1) * sizeof(char *)); // size + 1 for NULL
+
+            for (int j = 0; j < size; j++)
+                *pipeline[p][j] = tokenized[start + j];
+
+            *pipeline[p][size] = NULL;
+            start = i + 1;
+            p++;
+        }
+        if (tokenized[i] == NULL)
+            break;
+    }
+
+    return pipes; 
+}
+
+void run_pipeline(char ***pipeline, int cmds)
+
+/*
  * Main REPL loop for the shell.
  *
  * Repeatedly:
@@ -352,8 +397,8 @@ static void handle_sigint(int sig)
  */
 int main()
 {
-    signal(SIGCHLD, SIG_IGN);   // Reap background children
-    signal(SIGINT, handle_sigint); // Handle Ctrl-C without terminating the shell 
+    signal(SIGCHLD, SIG_IGN);      // Reap background children
+    signal(SIGINT, handle_sigint); // Handle Ctrl-C without terminating the shell
 
     while (1)
     {
@@ -380,6 +425,8 @@ int main()
 
         // Add the input to history
         add_shell_history(tokenized);
+
+        char ***pipeline;
 
         // exit
         if (strcmp(tokenized[0], "exit") == 0)
