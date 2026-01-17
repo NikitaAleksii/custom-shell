@@ -509,6 +509,69 @@ void run_pipeline(char ***pipeline, int cmds)
     free(pids);
 }
 
+void free_pipeline(char ***pipeline, int cmds)
+{
+    for (int i = 0; i < cmds; i++)
+    {
+        free(pipeline[i]); // free each command (char **)
+    }
+    free(pipeline); // free pipeline array
+}
+
+/*
+ * Checks whether the tokenized command contains a pipe symbol ("|")
+ *
+ * Returns:
+ *   1 if at least one pipe is present, 0 otherwise
+ */
+int contains_pipe(char **tokenized)
+{
+    int i = 0;
+    while (tokenized[i] != NULL)
+    {
+        if (strcmp(tokenized[i], "|") == 0)
+            return 1;
+        i++;
+    }
+    return 0;
+}
+
+/*
+ * Validates pipe syntax in a tokenized command
+ *
+ * Ensures the command does not start or end with a pipe and does not
+ * contain consecutive pipe symbols
+ *
+ * Returns:
+ *   1 if the pipe syntax is valid, 0 otherwise
+ */
+int is_valid_pipe(char **tokenized)
+{
+    if (tokenized == NULL || tokenized[0] == NULL)
+        return 0;
+
+    // Cannot start with '|'
+    if (strcmp(tokenized[0], "|") == 0)
+        return 0;
+
+    int i = 0;
+    while (tokenized[i] != NULL)
+    {
+        // Cannot have consecutive pipes
+        if (strcmp(tokenized[i], "|") == 0 &&
+            tokenized[i + 1] != NULL &&
+            strcmp(tokenized[i + 1], "|") == 0)
+            return 0;
+        i++;
+    }
+
+    // Cannot end with '|'
+    if (strcmp(tokenized[i - 1], "|") == 0)
+        return 0;
+
+    return 1;
+}
+
 /*
  * Main REPL loop for the shell.
  *
@@ -550,7 +613,26 @@ int main()
         // Add the input to history
         add_shell_history(tokenized);
 
-        char ***pipeline;
+        // Implements piping
+        char ***pipeline = NULL;
+        if (contains_pipe(tokenized))
+        {
+            if (!is_valid_pipe(tokenized))
+            {
+                fprintf(stderr, "syntax error near '|'\n");
+                free(tokenized);
+                free(line);
+                continue;
+            }
+
+            int pipes = split_pipeline(tokenized, &pipeline);
+            run_pipeline(pipeline, pipes + 1);
+            free_pipeline(pipeline, pipes + 1);
+
+            free(tokenized);
+            free(line);
+            continue;
+        }
 
         // exit
         if (strcmp(tokenized[0], "exit") == 0)
