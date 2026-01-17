@@ -363,7 +363,7 @@ int split_pipeline(char **tokenized, char ****pipeline)
     int pipes = 0;
     for (int i = 0; tokenized[i] != NULL; i++)
     {
-        if (strcmp(tokenized[0], "|") == 0)
+        if (strcmp(tokenized[i], "|") == 0)
             pipes++;
     }
 
@@ -373,22 +373,21 @@ int split_pipeline(char **tokenized, char ****pipeline)
     // Pipeline commands
     int p = 0;
     int start = 0;
-    for (int i = 0; tokenized[i] != NULL; i++)
+    for (int i = 0; ; i++)
     {
         if (tokenized[i] == NULL || strcmp(tokenized[i], "|") == 0)
         {
             int size = i - start;
-            *pipeline[p] = malloc((size + 1) * sizeof(char *)); // size + 1 for NULL
+            (*pipeline)[p] = malloc((size + 1) * sizeof(char *)); // size + 1 for NULL
 
             for (int j = 0; j < size; j++)
-                *pipeline[p][j] = tokenized[start + j];
+                (*pipeline)[p][j] = tokenized[start + j];
 
-            *pipeline[p][size] = NULL;
+            (*pipeline)[p][size] = NULL;
             start = i + 1;
             p++;
         }
-        if (tokenized[i] == NULL)
-            break;
+        if (tokenized[i] == NULL) break;
     }
 
     return pipes;
@@ -421,7 +420,6 @@ void run_pipeline(char ***pipeline, int cmds)
     for (int i = 0; i < cmds; i++)
     {
         int fd[2] = {-1, -1};
-
         // Create a pipe for all but the last command
         if (i < cmds - 1)
         {
@@ -597,7 +595,7 @@ int main()
         {
             free(line);
             break;
-        }
+        }        
 
         // Tokenize the input
         int background = 0;
@@ -619,7 +617,7 @@ int main()
         {
             if (!is_valid_pipe(tokenized))
             {
-                fprintf(stderr, "syntax error near '|'\n");
+                fprintf(stderr, "Not valid pipe\n");
                 free(tokenized);
                 free(line);
                 continue;
