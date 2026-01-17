@@ -40,7 +40,7 @@ char **parse_line(char *line, int *background, int *command_size)
     char *token = strtok(line, " \n");
     if (token == NULL)
         return NULL;
-    char **tokenized = (char **)malloc(MAX_CMD_STRING_NUM * sizeof(char *));
+    char **tokenized = malloc(MAX_CMD_STRING_NUM * sizeof(char *));
 
     if (!tokenized)
         return NULL;
@@ -287,7 +287,7 @@ void run_background(pid_t pid, char **tokenized)
     else if (pid == 0)
     {
         execvp(tokenized[0], tokenized);
-        printf("Failed executing command\n");
+        perror("Failed executing command\n");
         exit(1);
     }
 }
@@ -316,7 +316,7 @@ void run_foreground(pid_t pid, char **tokenized)
     {
         signal(SIGINT, SIG_DFL);
         execvp(tokenized[0], tokenized);
-        printf("Failed executing command\n");
+        perror("Failed executing command\n");
         exit(1);
     }
     else
@@ -345,9 +345,6 @@ static void handle_sigint(int sig)
  */
 int split_pipeline(char **tokenized, char ****pipeline)
 {
-    if (strcmp(tokenized[0], "|") == 0)
-        return NULL;
-
     // Count the number of pipes
     int pipes = 0;
     for (int i = 0; tokenized[i] != NULL; i++)
@@ -357,7 +354,7 @@ int split_pipeline(char **tokenized, char ****pipeline)
     }
 
     // Allocate memmory for pipes + 1 commands
-    *pipeline = (char ***)malloc((pipes + 1) * sizeof(char **));
+    *pipeline = malloc((pipes + 1) * sizeof(char **));
 
     // Pipeline commands
     int p = 0;
@@ -367,7 +364,7 @@ int split_pipeline(char **tokenized, char ****pipeline)
         if (tokenized[i] == NULL || strcmp(tokenized[i], "|") == 0)
         {
             int size = i - start;
-            *pipeline[p] = (char **)malloc((size + 1) * sizeof(char *)); // size + 1 for NULL
+            *pipeline[p] = malloc((size + 1) * sizeof(char *)); // size + 1 for NULL
 
             for (int j = 0; j < size; j++)
                 *pipeline[p][j] = tokenized[start + j];
@@ -380,10 +377,100 @@ int split_pipeline(char **tokenized, char ****pipeline)
             break;
     }
 
-    return pipes; 
+    return pipes;
 }
 
 void run_pipeline(char ***pipeline, int cmds)
+{
+    int prev_fd = -1;
+
+    pid_t *pids = malloc(cmds * sizeof(pid_t));
+    if (pids == NULL)
+    {
+        perror("Failed running pipeline (malloc)");
+        return;
+    }
+
+    for (int i = 0; i < cmds; i++)
+    {
+        int fd[2] = {-1, -1};
+
+        if (i < cmds - 1)
+        {
+            if (pipe(fd) == -1)
+            {
+                perror("Failed running pipeline (pipe)");
+                if (prev_fd != -1)
+                    close(prev_fd);
+                for (int k = 0; k < i; k++)
+                    waitpid(pids[k], NULL, 0);
+                free(pids);
+                return;
+            }
+        }
+
+        pid_t pid;
+        if ((pid = fork()) == -1)
+        {
+            perror("Failed running pipeline (fork)");
+            if (prev_fd != -1)
+                close(prev_fd);
+            if (fd[0] != -1)
+                close(fd[0]);
+            if (fd[1] != -1)
+                close(fd[1]);
+            for (int k = 0; k < i; k++)
+                waitpid(pids[k], NULL, 0);
+            free(pids);
+            return;
+        }
+        if (pid == 0)
+        {
+            if (prev_fd != -1)
+            {
+                if (dup2(prev_fd, STDIN_FILENO) == -1)
+                {
+                    perror("Failed running pipeline (dup2)");
+                    exit(1);
+                }
+            }
+
+            if (i < cmds - 1)
+            {
+                close(fd[0]);
+                if (dup2(fd[1], STDOUT_FILENO) == -1)
+                {
+                    perror("Failed running pipeline (dup2)");
+                    _exit(1);
+                }
+                close(fd[1]);
+            }
+            if (prev_fd != -1)
+                close(prev_fd);
+
+            execvp(pipeline[i][0], pipeline[i]);
+            perror("Failed running pipeline (execvp)");
+            exit(1);
+        }
+        pids[i] = pid;
+
+        if (prev_fd != -1)
+            close(prev_fd);
+
+        if (i < cmds - 1)
+        {
+            close(fd[1]);
+            prev_fd = fd[0];
+        }
+    }
+    if (prev_fd != -1)
+        close(prev_fd);
+
+    for (int i = 0; i < cmds; i++)
+        waitpid(pids[i], NULL, 0);
+
+    free(pids);
+}
 
 /*
  * Main REPL loop for the shell.
