@@ -1,50 +1,50 @@
-# Custom C Shell
+# Simple Shell
 
-A Unix-like shell implemented in C, inspired by POSIX sh and Bash
+A lightweight, interactive command-line shell written in C. This shell supports basic command execution, piping (`|`), background processes (`&`), command history, and common built-in commands like `cd`, `pwd`, `history`, and `exit`.
 
 ## Features
 
-### Command Execution
+- **Interactive Prompt**: Displays username and current directory (e.g., `nikita Documents> `).
+- **Command Parsing**: Properly tokenizes input, handling single (`'`) and double (`"`) quotes to preserve spaces within arguments.
+- **Built-in Commands**:
+  - `exit`: Exit the shell.
+  - `history`: Show the last 10 commands with IDs.
+  - `pwd`: Print the current working directory.
+  - `cd [path]`: Change directory (supports `cd` to home, `cd -` to previous, or `cd <path>`).
+- **External Commands**: Runs any executable via `execvp`.
+- **Piping**: Supports multi-stage pipelines (e.g., `ls | grep '.c'`).
+- **Background Execution**: Run commands in the background (e.g., `sleep 10 &`).
+- **Signal Handling**: Ctrl+C (SIGINT) returns to the prompt; background children are reaped automatically.
+- **Command History**: Circular buffer storing up to 10 recent commands.
 
-- Executes external programs using `fork()` and `execvp()`
-- Foreground execution waits for completion
+## Compilation
 
-### Background Execution
-
-- Commands ending with `&` run in the background
-- Background processes are automatically reaped
-
-Example:
-
-```sh
-sleep 5 &
+```bash
+gcc -o myshell shell.c -ledit
 ```
 
-### Pipelines
+## Usage
 
-- Supports pipelines using `|`
-- Each pipeline stage runs in its own process
-- Pipes connected using `pipe()` and `dup2()`
+Run the shell:
 
-Example:
-
-```sh
-ls -la | grep .c | wc -l
+```bash
+./myshell
 ```
 
----
+Enter commands at the prompt. Type `exit` to quit.
 
-## Built-in Commands
+### Examples
 
-- `exit` – Exit the shell
-- `history` – Show command history
-- `pwd` – Print current working directory
-- `cd` – Change directory
+- List files: `ls -l`
+- Grep with quotes: `ls | grep ".c"`
+- Change directory: `cd ..`
+- Previous directory: `cd -`
+- Background sleep: `sleep 5 &`
+- History: `history`
 
-### cd Behavior
+## Limitations
 
-```sh
-cd        # go to $HOME
-cd <path> # go to path
-cd -      # go to $OLDPWD
-```
+- No support for input/output redirection (`>`, `<`, `>>`).
+- No variable expansion (`$VAR`), globbing (`*`), or job control (`fg`, `bg`, `jobs`).
+- Quoted strings do not support escaping (e.g., `\"`).
+- Basic pipe validation: rejects invalid syntax (e.g., starting/ending with `|`, consecutive `|`).
