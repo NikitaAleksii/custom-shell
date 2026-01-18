@@ -23,8 +23,13 @@ history_t history_buffer[HISTORY_MAX];
 size_t next_id = 0;
 
 /*
- * Tokenizes the input line into tokens using strtok().
- * If the final token is exactly "&", sets *background = 1 and removes that token
+ * Parses a raw input line into a NULL-terminated array of tokens.
+ *
+ * The function:
+ *   - Splits the input on whitespace (spaces, tabs, newlines)
+ *   - Preserves text enclosed in single ('') or double ("") quotes as a single token
+ *   - Each token and the token array are dynamically allocated
+ *   - The caller is responsible for freeing the result using free_tokens()
  *
  * Parameters:
  *   line         - user input
@@ -32,47 +37,108 @@ size_t next_id = 0;
  *   command_size - output count of tokens excluding "&"
  *
  * Returns:
- *   Pointer to a NULL-terminated heap-allocated array of char* tokens, or NULL on failure/empty input
- *   The returned array should be freed by the caller
+ *   A NULL-terminated array of heap-allocated strings representing tokens,
+ *   or NULL on allocation failure.
  */
 char **parse_line(char *line, int *background, int *command_size)
 {
-    char *token = strtok(line, " \n");
-    if (token == NULL)
-        return NULL;
-    char **tokenized = malloc(MAX_CMD_STRING_NUM * sizeof(char *));
-
-    if (!tokenized)
-        return NULL;
-
-    // Parse through user input and append tokens to the array
+    int pos = 0;
     int i = 0;
-    while (token != NULL)
+    int len = strlen(line);
+
+    char **tokenized = malloc(MAX_CMD_STRING_NUM * sizeof(char *));
+    if (!tokenized)
     {
-        if (i >= MAX_CMD_STRING_NUM - 1)
+        perror("Parse Line Error (malloc tokenized)");
+        return NULL;
+    }
+
+    while (pos < len)
+    {
+        while (pos < len && (line[pos] == ' ' || line[pos] == '\t' || line[pos] == '\n'))
+            pos++;
+
+        if (pos >= len)
+            break;
+
+        char ch = '\0';
+        if (line[pos] == '\'' || line[pos] == '"')
         {
-            free(tokenized);
-            return NULL;
+            ch = line[pos];
+            pos++;
         }
 
-        tokenized[i] = token;
-        i++;
-        token = strtok(NULL, " \n");
+        int start = pos;
+        int closed = 0;
+        while (pos < len)
+        {
+            if (ch != '\0')
+            {
+                if (line[pos] == ch)
+                {
+                    closed = 1;
+                    pos++;
+                    break;
+                }
+            }
+            else
+            {
+                if (line[pos] == ' ' || line[pos] == '\t' || line[pos] == '\n')
+                    break;
+            }
+            pos++;
+        }
+
+        int token_len = pos - start;
+        if (closed)
+            token_len--;
+
+        if (token_len > 0)
+        {
+            char *token = malloc(token_len + 1);
+            if (!token)
+            {
+                for (int j = 0; j < i; j++)
+                    free(tokenized[j]);
+                free(tokenized);
+                perror("Parse Line Error (malloc)");
+                return NULL;
+            }
+            strncpy(token, line + start, token_len);
+            token[token_len] = '\0';
+            tokenized[i++] = token;
+        }
     }
 
     tokenized[i] = NULL;
     *command_size = i;
 
-    // If the last entered character is &, set the background flag to 1, and remove the character from the array
-    if (strcmp(tokenized[i - 1], "&") == 0)
+    // Background check
+    if (i > 0 && strcmp(tokenized[i - 1], "&") == 0)
     {
-        fflush(stdout);
+        free(tokenized[i - 1]);
         tokenized[i - 1] = NULL;
         *background = 1;
-        *command_size = *command_size - 1;
+        *command_size = i - 1;
     }
 
     return tokenized;
+}
+
+/*
+ * Frees a token array produced by parse_line().
+ *
+ * Parameters:
+ *   tokenized     - NULL-terminated array of tokens
+ *   command_size  - Number of valid tokens in the array
+ */
+void free_tokens(char **tokenized, int command_size)
+{
+    for (int i = 0; i < command_size; i++)
+    {
+        free(tokenized[i]);
+    }
+    free(tokenized);
 }
 
 /*
@@ -373,7 +439,7 @@ int split_pipeline(char **tokenized, char ****pipeline)
     // Pipeline commands
     int p = 0;
     int start = 0;
-    for (int i = 0; ; i++)
+    for (int i = 0;; i++)
     {
         if (tokenized[i] == NULL || strcmp(tokenized[i], "|") == 0)
         {
@@ -387,7 +453,8 @@ int split_pipeline(char **tokenized, char ****pipeline)
             start = i + 1;
             p++;
         }
-        if (tokenized[i] == NULL) break;
+        if (tokenized[i] == NULL)
+            break;
     }
 
     return pipes;
@@ -595,7 +662,7 @@ int main()
         {
             free(line);
             break;
-        }        
+        }
 
         // Tokenize the input
         int background = 0;
@@ -618,7 +685,7 @@ int main()
             if (!is_valid_pipe(tokenized))
             {
                 fprintf(stderr, "Not valid pipe\n");
-                free(tokenized);
+                free_tokens(tokenized, command_size);
                 free(line);
                 continue;
             }
@@ -627,7 +694,7 @@ int main()
             run_pipeline(pipeline, pipes + 1);
             free_pipeline(pipeline, pipes + 1);
 
-            free(tokenized);
+            free_tokens(tokenized, command_size);
             free(line);
             continue;
         }
@@ -635,7 +702,7 @@ int main()
         // exit
         if (strcmp(tokenized[0], "exit") == 0)
         {
-            free(tokenized);
+            free_tokens(tokenized, command_size);
             free(line);
             return 0;
         }
@@ -671,7 +738,7 @@ int main()
         if (strcmp(tokenized[0], "cd") == 0)
         {
             builtin_cd(tokenized, command_size);
-            free(tokenized);
+            free_tokens(tokenized, command_size);
             free(line);
             continue;
         }
@@ -688,7 +755,7 @@ int main()
             run_foreground(pid, tokenized);
         }
 
-        free(tokenized);
+        free_tokens(tokenized, command_size);
         free(line);
     }
     return 0;
